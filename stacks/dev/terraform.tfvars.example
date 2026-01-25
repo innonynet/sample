@@ -1,0 +1,13 @@
+# Dev Environment - Example Variables
+# Copy this file to terraform.tfvars and fill in your values
+
+environment  = "dev"
+project      = "myproject"
+region       = "ap-northeast-1"
+network_cidr = "10.0.0.0/16"
+repository   = "your-org/infra-template"
+
+tags = {
+  Owner      = "platform-team"
+  CostCenter = "engineering"
+}

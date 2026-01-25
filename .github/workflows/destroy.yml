@@ -1,0 +1,165 @@
+name: Destroy Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to destroy'
+        required: true
+        type: choice
+        options:
+          - dev
+          - stg
+          # prd is intentionally excluded - uncomment only if absolutely necessary
+          # - prd
+      confirm:
+        description: 'Type "destroy-{environment}" to confirm (e.g., destroy-dev)'
+        required: true
+        type: string
+      reason:
+        description: 'Reason for destruction (will be logged)'
+        required: true
+        type: string
+
+concurrency:
+  group: destroy-${{ github.event.inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  CLOUD_PROVIDER: aws
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  validate:
+    name: Validate Request
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Confirmation
+        run: |
+          expected="destroy-${{ github.event.inputs.environment }}"
+          if [[ "${{ github.event.inputs.confirm }}" != "$expected" ]]; then
+            echo "::error::Confirmation failed. Please type '$expected' to proceed."
+            exit 1
+          fi
+
+      - name: Log Destruction Request
+        run: |
+          echo "## ⚠️ Environment Destruction Requested" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ github.event.inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Requested by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Reason | ${{ github.event.inputs.reason }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Time | $(date -u +'%Y-%m-%d %H:%M:%S UTC') |" >> $GITHUB_STEP_SUMMARY
+
+  plan-destroy:
+    name: Plan Destroy
+    needs: validate
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Configure AWS Credentials
+        if: env.CLOUD_PROVIDER == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars[format('AWS_ROLE_ARN_{0}', github.event.inputs.environment)] }}
+          aws-region: ap-northeast-1
+
+      - name: Terraform Init
+        working-directory: stacks/${{ github.event.inputs.environment }}
+        run: terraform init -input=false
+
+      - name: Terraform Plan Destroy
+        working-directory: stacks/${{ github.event.inputs.environment }}
+        run: |
+          terraform plan -destroy -out=tfplan-destroy -input=false -no-color | tee destroy-plan.txt
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: destroy-plan-${{ github.event.inputs.environment }}
+          path: stacks/${{ github.event.inputs.environment }}/destroy-plan.txt
+
+  destroy:
+    name: Destroy
+    needs: plan-destroy
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.7.0"
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Configure AWS Credentials
+        if: env.CLOUD_PROVIDER == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars[format('AWS_ROLE_ARN_{0}', github.event.inputs.environment)] }}
+          aws-region: ap-northeast-1
+
+      - name: Terraform Init
+        working-directory: stacks/${{ github.event.inputs.environment }}
+        run: terraform init -input=false
+
+      - name: Terraform Destroy
+        working-directory: stacks/${{ github.event.inputs.environment }}
+        run: terraform destroy -auto-approve -input=false
+
+      - name: Log Destruction
+        run: |
+          echo "## ✅ Environment Destroyed" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Item | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ github.event.inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Destroyed by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Reason | ${{ github.event.inputs.reason }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Time | $(date -u +'%Y-%m-%d %H:%M:%S UTC') |" >> $GITHUB_STEP_SUMMARY
+
+  notify:
+    name: Notify
+    needs: destroy
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Notify Result
+        run: |
+          if [[ "${{ needs.destroy.result }}" == "success" ]]; then
+            echo "✅ Environment ${{ github.event.inputs.environment }} destroyed successfully"
+          else
+            echo "❌ Failed to destroy environment ${{ github.event.inputs.environment }}"
+            exit 1
+          fi
+
+      # Uncomment for Slack notification
+      # - name: Slack Notification
+      #   uses: slackapi/slack-github-action@v1
+      #   with:
+      #     payload: |
+      #       {
+      #         "text": "🗑️ Environment destroyed: ${{ github.event.inputs.environment }}",
+      #         "attachments": [{
+      #           "color": "danger",
+      #           "fields": [
+      #             {"title": "Environment", "value": "${{ github.event.inputs.environment }}", "short": true},
+      #             {"title": "By", "value": "${{ github.actor }}", "short": true},
+      #             {"title": "Reason", "value": "${{ github.event.inputs.reason }}"}
+      #           ]
+      #         }]
+      #       }
+      #   env:
+      #     SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

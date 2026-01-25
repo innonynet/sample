@@ -1,0 +1,12 @@
+# Prd Environment - Example Variables
+
+environment  = "prd"
+project      = "myproject"
+region       = "ap-northeast-1"
+network_cidr = "10.2.0.0/16"
+repository   = "your-org/infra-template"
+
+tags = {
+  Owner      = "platform-team"
+  CostCenter = "engineering"
+}

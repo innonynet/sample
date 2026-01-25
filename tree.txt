@@ -1,0 +1,108 @@
+infrastructure-template/
+├── README.md                    # 「必要なものだけ選べ」導線
+├── ARCHITECTURE.md              # 設計決定書（全員読む）
+├── SECURITY.md                  # セキュリティ方針
+├── .github/
+│   ├── workflows/
+│   │   ├── 01-validate.yaml      # fmt/validate/lint (全PR)
+│   │   ├── 02-plan.yaml          # plan + IaC scan (dev/stg/prd別)
+│   │   ├── 03-apply.yaml         # apply (環境別承認)
+│   │   ├── 04-drift-detect.yaml  # 日次plan (cron)
+│   │   ├── 05-destroy.yaml       # destroy (手動trigger, 厳格)
+│   │   └── 06-sbom.yaml          # リリース時 SBOM生成
+│   ├── CODEOWNERS
+│   └── branch-protection.md      # 設定手順
+│
+├── terraform/                   # IaC本体（責務分離で配置）
+│   ├── variables.tf             # 全stackで共通の入力変数型定義
+│   ├── versions.tf              # Terraform バージョン仕様
+│   │
+│   ├── cloud/
+│   │   ├── aws/
+│   │   │   ├── foundation/
+│   │   │   │   ├── network.tf   # VPC, Subnets, NatGW ...
+│   │   │   │   ├── iam.tf       # Service Roles
+│   │   │   │   └── variables.tf # 変数定義（AWSローカル拡張）
+│   │   │   ├── platform/
+│   │   │   │   ├── eks.tf       # Kubernetes基盤
+│   │   │   │   ├── monitoring.tf
+│   │   │   │   └── variables.tf
+│   │   │   └── outputs.tf       # 上位に公開
+│   │   │
+│   │   ├── azure/
+│   │   │   ├── foundation/
+│   │   │   │   ├── network.tf   # Vnet, Subnet, NSG ...
+│   │   │   │   ├── iam.tf       # RBAC, ServicePrincipal
+│   │   │   │   └── variables.tf
+│   │   │   ├── platform/
+│   │   │   │   ├── aks.tf       # AKS基盤
+│   │   │   │   ├── monitoring.tf
+│   │   │   │   └── variables.tf
+│   │   │   └── outputs.tf
+│   │   │
+│   │   └── gcp/
+│   │       ├── foundation/
+│   │       │   ├── network.tf   # VPC, Subnet, Firewall ...
+│   │       │   ├── iam.tf       # IAM Role, ServiceAccount
+│   │       │   └── variables.tf
+│   │       ├── platform/
+│   │       │   ├── gke.tf       # GKE基盤
+│   │       │   ├── monitoring.tf
+│   │       │   └── variables.tf
+│   │       └── outputs.tf
+│   │
+│   ├── stacks/                  # 環境スタック（ユーザーが選ぶ）
+│   │   ├── dev/
+│   │   │   ├── terraform.tfvars # dev用変数
+│   │   │   ├── backend.tf       # state設定（Terraform Cloud or S3/Blob）
+│   │   │   └── main.tf          # cloud/aws|azure|gcp を呼び出し
+│   │   ├── stg/
+│   │   │   ├── terraform.tfvars
+│   │   │   ├── backend.tf
+│   │   │   └── main.tf
+│   │   └── prd/
+│   │       ├── terraform.tfvars
+│   │       ├── backend.tf
+│   │       └── main.tf
+│   │
+│   ├── modules/                 # 再利用可能モジュール（optional）
+│   │   ├── compute/
+│   │   ├── storage/
+│   │   └── networking/
+│   │
+│   └── .terraform.lock.hcl      # version lock (commit)
+│
+├── scripts/
+│   ├── setup.sh                 # 初期セットアップ（OIDCトークン、変数設定）
+│   ├── validate.sh              # fmt/validate
+│   ├── plan-diff.sh             # cloud/env別 plan表示
+│   ├── apply-env.sh             # 環境別apply（チェック付き）
+│   ├── sbom-generate.sh         # SBOM生成
+│   └── state-migrate.sh         # backend移行用
+│
+├── security/
+│   ├── tfsec-config.yaml        # IaC scan設定
+│   ├── checkov-policy.yaml      # Custom Policy
+│   ├── trivy-config.yaml        # 依存関係scan
+│   └── sbom-template.yaml       # SBOM template
+│
+├── docs/
+│   ├── 01-quickstart.md         # 「まず最初にこれ」（5分）
+│   ├── 02-cloud-selection.md    # AWS/Azure/GCP選択フロー
+│   ├── 03-backend-setup.md      # Terraform Cloud or self-managed
+│   ├── 04-pr-workflow.md        # PR→apply の流れ
+│   ├── 05-production-deploy.md  # prd承認フロー
+│   ├── 06-state-management.md   # state lock, backup, disaster recovery
+│   ├── 07-rbac-setup.md         # GitHub Teams + OIDCトークン設定
+│   ├── 08-security.md           # scan, SBOM, monitoring
+│   ├── 09-troubleshooting.md    # よくあるエラー
+│   └── 10-extend.md             # テンプレ拡張ガイド
+│
+├── examples/
+│   ├── aws-dev.md               # AWS dev環境最小構成例
+│   ├── azure-prd.md             # Azure prd構成例
+│   └── gcp-dev.md               # GCP dev構成例
+│
+├── .gitignore
+├── LICENSE
+└── CHANGELOG.md

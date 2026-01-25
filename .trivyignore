@@ -1,0 +1,11 @@
+# Trivy Ignore File
+# https://aquasecurity.github.io/trivy/latest/docs/configuration/filtering/
+
+# Example: Ignore specific CVEs
+# CVE-2021-12345
+
+# Example: Ignore specific check IDs
+# AVD-AWS-0001
+
+# Note: Add ignores with justification comments
+# Each ignore should be reviewed periodically
