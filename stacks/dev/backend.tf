@@ -3,7 +3,7 @@
 
 terraform {
   cloud {
-    organization = "your-org"
+    organization = "Innospot"
 
     workspaces {
       name = "infra-dev"
