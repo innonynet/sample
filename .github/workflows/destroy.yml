@@ -86,7 +86,7 @@ jobs:
           terraform plan -destroy -out=tfplan-destroy -input=false -no-color | tee destroy-plan.txt
 
       - name: Upload Plan
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: destroy-plan-${{ github.event.inputs.environment }}
           path: stacks/${{ github.event.inputs.environment }}/destroy-plan.txt
