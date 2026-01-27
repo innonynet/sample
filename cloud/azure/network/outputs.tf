@@ -1,28 +1,23 @@
 # Azure Network Module - Outputs
 
-output "public_subnet_id" {
-  value       = azurerm_subnet.public.id
-  description = "Public subnet ID"
+output "vm_subnet_id" {
+  value       = azurerm_subnet.vm.id
+  description = "VM subnet ID"
 }
 
-output "private_subnet_id" {
-  value       = azurerm_subnet.private.id
-  description = "Private subnet ID"
+output "vm_subnet_cidr" {
+  value       = local.vm_subnet_cidr
+  description = "VM subnet CIDR"
 }
 
-output "database_subnet_id" {
-  value       = azurerm_subnet.database.id
-  description = "Database subnet ID"
+output "bastion_subnet_id" {
+  value       = azurerm_subnet.bastion.id
+  description = "Bastion subnet ID"
 }
 
-output "public_subnet_ids" {
-  value       = [azurerm_subnet.public.id]
-  description = "Public subnet IDs (standardized)"
-}
-
-output "private_subnet_ids" {
-  value       = [azurerm_subnet.private.id]
-  description = "Private subnet IDs (standardized)"
+output "bastion_subnet_cidr" {
+  value       = local.bastion_subnet_cidr
+  description = "Bastion subnet CIDR"
 }
 
 output "nat_gateway_id" {
@@ -35,12 +30,7 @@ output "nat_public_ip" {
   description = "NAT Gateway public IP"
 }
 
-output "public_nsg_id" {
-  value       = azurerm_network_security_group.public.id
-  description = "Public NSG ID"
-}
-
-output "private_nsg_id" {
-  value       = azurerm_network_security_group.private.id
-  description = "Private NSG ID"
+output "vm_nsg_id" {
+  value       = azurerm_network_security_group.vm.id
+  description = "VM NSG ID"
 }

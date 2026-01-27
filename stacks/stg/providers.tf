@@ -1,13 +1,9 @@
 # Stg Environment - Provider Configuration
 
-provider "aws" {
-  region = var.region
-
-  default_tags {
-    tags = {
-      Environment = var.environment
-      Project     = var.project
-      ManagedBy   = "terraform"
+provider "azurerm" {
+  features {
+    key_vault {
+      purge_soft_delete_on_destroy = true
     }
   }
 }

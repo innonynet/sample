@@ -13,10 +13,8 @@ variable "project" {
 
 variable "region" {
   type        = string
-  description = "Cloud region"
-  default     = "ap-northeast-1" # AWS Tokyo
-  # default   = "japaneast"       # Azure
-  # default   = "asia-northeast1" # GCP Tokyo
+  description = "Azure region"
+  default     = "japaneast"
 }
 
 variable "network_cidr" {
@@ -35,4 +33,23 @@ variable "tags" {
   type        = map(string)
   description = "Additional tags"
   default     = {}
+}
+
+# VM-related variables
+
+variable "admin_username" {
+  type        = string
+  description = "Admin username for VM"
+  default     = "azureuser"
+}
+
+variable "ssh_public_key" {
+  type        = string
+  description = "SSH public key for VM authentication"
+}
+
+variable "vm_size" {
+  type        = string
+  description = "VM size"
+  default     = "Standard_B2s"
 }

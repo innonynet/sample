@@ -1,18 +1,41 @@
 # Azure Platform Module - Outputs
 
-# Uncomment when using AKS
-# output "aks_cluster_name" {
-#   value       = azurerm_kubernetes_cluster.main.name
-#   description = "AKS cluster name"
-# }
+output "vm_public_ip" {
+  value       = azurerm_public_ip.vm.ip_address
+  description = "VM public IP address"
+}
 
-# output "aks_cluster_id" {
-#   value       = azurerm_kubernetes_cluster.main.id
-#   description = "AKS cluster ID"
-# }
+output "vm_private_ip" {
+  value       = azurerm_network_interface.vm.private_ip_address
+  description = "VM private IP address"
+}
 
-# output "aks_kube_config" {
-#   value       = azurerm_kubernetes_cluster.main.kube_config_raw
-#   description = "AKS kubeconfig"
-#   sensitive   = true
-# }
+output "vm_id" {
+  value       = azurerm_linux_virtual_machine.main.id
+  description = "VM ID"
+}
+
+output "vm_name" {
+  value       = azurerm_linux_virtual_machine.main.name
+  description = "VM name"
+}
+
+output "vm_identity_principal_id" {
+  value       = azurerm_linux_virtual_machine.main.identity[0].principal_id
+  description = "VM managed identity principal ID"
+}
+
+output "bastion_id" {
+  value       = azurerm_bastion_host.main.id
+  description = "Bastion host ID"
+}
+
+output "bastion_name" {
+  value       = azurerm_bastion_host.main.name
+  description = "Bastion host name"
+}
+
+output "bastion_public_ip" {
+  value       = azurerm_public_ip.bastion.ip_address
+  description = "Bastion public IP address"
+}

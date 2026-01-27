@@ -30,13 +30,13 @@ locals {
   }
 
   location_short = {
-    "japaneast"      = "jpe"
-    "japanwest"      = "jpw"
-    "eastus"         = "eus"
-    "westus"         = "wus"
-    "westeurope"     = "weu"
-    "northeurope"    = "neu"
-    "southeastasia"  = "sea"
+    "japaneast"     = "jpe"
+    "japanwest"     = "jpw"
+    "eastus"        = "eus"
+    "westus"        = "wus"
+    "westeurope"    = "weu"
+    "northeurope"   = "neu"
+    "southeastasia" = "sea"
   }
 }
 

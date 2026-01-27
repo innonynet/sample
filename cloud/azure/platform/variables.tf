@@ -20,12 +20,35 @@ variable "resource_group_name" {
   description = "Resource Group name"
 }
 
-variable "private_subnet_id" {
+variable "vm_subnet_id" {
   type        = string
-  description = "Private subnet ID"
+  description = "VM subnet ID"
 }
 
-variable "key_vault_id" {
+variable "bastion_subnet_id" {
   type        = string
-  description = "Key Vault ID"
+  description = "Bastion subnet ID"
+}
+
+variable "admin_username" {
+  type        = string
+  description = "Admin username for VM"
+  default     = "azureuser"
+}
+
+variable "ssh_public_key" {
+  type        = string
+  description = "SSH public key for VM authentication"
+}
+
+variable "vm_size" {
+  type        = string
+  description = "VM size"
+  default     = "Standard_B2s"
+}
+
+variable "allowed_inbound_cidrs" {
+  type        = list(string)
+  description = "CIDRs allowed for inbound traffic (e.g., for HTTP/HTTPS)"
+  default     = []
 }

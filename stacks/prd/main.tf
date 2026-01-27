@@ -1,5 +1,5 @@
 # Prd Environment Stack
-# Entry point for prd environment infrastructure
+# Entry point for prd environment infrastructure (Azure)
 # NOTE: Production environment has additional safeguards
 
 # =============================================================================
@@ -7,10 +7,11 @@
 # =============================================================================
 
 module "foundation" {
-  source = "../../cloud/aws/foundation"
+  source = "../../cloud/azure/foundation"
 
   environment  = var.environment
   project      = var.project
+  region       = var.region
   network_cidr = var.network_cidr
   repository   = var.repository
   tags         = var.tags
@@ -21,38 +22,66 @@ module "foundation" {
 # =============================================================================
 
 module "network" {
-  source = "../../cloud/aws/network"
+  source = "../../cloud/azure/network"
 
   environment         = var.environment
   project             = var.project
-  vpc_id              = module.foundation.vpc_id
+  region              = module.foundation.region
+  resource_group_name = module.foundation.resource_group_name
+  vnet_name           = module.foundation.vnet_name
   network_cidr        = var.network_cidr
-  internet_gateway_id = module.foundation.internet_gateway_id
-  availability_zones  = module.foundation.availability_zones
+}
+
+# =============================================================================
+# Platform Layer
+# =============================================================================
+
+module "platform" {
+  source = "../../cloud/azure/platform"
+
+  environment         = var.environment
+  project             = var.project
+  region              = module.foundation.region
+  resource_group_name = module.foundation.resource_group_name
+  vm_subnet_id        = module.network.vm_subnet_id
+  bastion_subnet_id   = module.network.bastion_subnet_id
+  admin_username      = var.admin_username
+  ssh_public_key      = var.ssh_public_key
+  vm_size             = var.vm_size
 }
 
 # =============================================================================
 # Outputs
 # =============================================================================
 
-output "vpc_id" {
-  value       = module.foundation.vpc_id
-  description = "VPC ID"
+output "resource_group_name" {
+  value       = module.foundation.resource_group_name
+  description = "Resource Group name"
 }
 
-output "vpc_cidr" {
-  value       = module.foundation.vpc_cidr
-  description = "VPC CIDR"
+output "vnet_id" {
+  value       = module.foundation.vnet_id
+  description = "VNet ID"
 }
 
-output "public_subnet_ids" {
-  value       = module.network.public_subnet_ids
-  description = "Public subnet IDs"
+output "vm_public_ip" {
+  value       = module.platform.vm_public_ip
+  description = "VM public IP address"
 }
 
-output "private_subnet_ids" {
-  value       = module.network.private_subnet_ids
-  description = "Private subnet IDs"
+output "vm_private_ip" {
+  value       = module.platform.vm_private_ip
+  description = "VM private IP address"
+}
+
+output "bastion_id" {
+  value       = module.platform.bastion_id
+  description = "Bastion host ID"
+}
+
+output "bastion_name" {
+  value       = module.platform.bastion_name
+  description = "Bastion host name"
 }
 
 output "environment" {

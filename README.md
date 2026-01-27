@@ -1,97 +1,98 @@
-# Infrastructure Template
+# Azure VM + Bastion Infrastructure
 
-> マルチクラウド対応 IaC + CI/CD テンプレート (AWS / Azure / GCP)
+> Azure上にVM + Bastion構成を構築するTerraformテンプレート
 
 [![Terraform](https://img.shields.io/badge/Terraform-%3E%3D1.7-blue.svg)](https://www.terraform.io/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-## 🚀 クイックスタート（5分で始める）
+## 概要
 
-### Step 1: あなたの構成を選ぶ
+このリポジトリは、Azure上に以下のリソースを構築します:
 
-| 選択項目 | 選択肢 |
-|---------|--------|
-| クラウド | [ ] AWS / [ ] Azure / [ ] GCP |
-| Backend | [ ] Terraform Cloud / [ ] 自前管理 (S3/GCS/Blob) |
-| 初期環境 | dev（推奨）→ stg → prd の順で構築 |
+- **Resource Group** - リソース管理グループ
+- **Virtual Network / Subnets** - VM用サブネット + AzureBastionSubnet
+- **Network Security Group** - 22/3389をインターネットから遮断、Bastion経由のみ許可
+- **Public IP (VM用)** - VMのインターネット通信用
+- **Public IP (Bastion用)** - Bastion接続用
+- **Linux VM** - Ubuntu 22.04 LTS
+- **Azure Bastion** - セキュアな管理アクセス
 
-### Step 2: リポジトリをフォーク & クローン
-
-```bash
-# フォーク後
-git clone https://github.com/YOUR_ORG/infra-template.git
-cd infra-template
-```
-
-### Step 3: 不要なクラウドディレクトリを削除
-
-```bash
-# AWSのみ使う場合
-rm -rf cloud/azure cloud/gcp
-
-# Azureのみ使う場合
-rm -rf cloud/aws cloud/gcp
-
-# GCPのみ使う場合
-rm -rf cloud/aws cloud/azure
-```
-
-### Step 4: Backend設定
-
-- [Terraform Cloud を使う場合](#terraform-cloud-setup)
-- [自前Backend を使う場合](#self-managed-backend)
-
-### Step 5: GitHub設定
-
-- [必須設定チェックリスト](#github-setup)
-
-### Step 6: 初回デプロイ
-
-```bash
-# dev環境で動作確認
-cd stacks/dev
-terraform init
-terraform plan
-
-# PRを作成してマージ → 自動デプロイ
-```
-
----
-
-## 📁 使うファイル早見表
-
-| あなたの選択 | 使うディレクトリ | 削除してよいもの |
-|-------------|-----------------|-----------------|
-| AWS + TFC | `cloud/aws/`, `stacks/`, `policies/sentinel/` | `cloud/azure/`, `cloud/gcp/`, `policies/opa/` |
-| AWS + 自前Backend | `cloud/aws/`, `stacks/`, `policies/opa/` | `cloud/azure/`, `cloud/gcp/`, `policies/sentinel/` |
-| Azure + TFC | `cloud/azure/`, `stacks/`, `policies/sentinel/` | `cloud/aws/`, `cloud/gcp/`, `policies/opa/` |
-| Azure + 自前Backend | `cloud/azure/`, `stacks/`, `policies/opa/` | `cloud/aws/`, `cloud/gcp/`, `policies/sentinel/` |
-| GCP + TFC | `cloud/gcp/`, `stacks/`, `policies/sentinel/` | `cloud/aws/`, `cloud/azure/`, `policies/opa/` |
-| GCP + 自前Backend | `cloud/gcp/`, `stacks/`, `policies/opa/` | `cloud/aws/`, `cloud/azure/`, `policies/sentinel/` |
-
----
-
-## 🔧 設定リファレンス
-
-### <a id="terraform-cloud-setup"></a>Terraform Cloud設定
-
-#### 1. Workspace作成
+## アーキテクチャ
 
 ```
-Organization: your-org
-├── Project: infrastructure
-│   ├── Workspace: infra-dev
-│   ├── Workspace: infra-stg
-│   └── Workspace: infra-prd
+                    Internet
+                        │
+            ┌───────────┴───────────┐
+            │                       │
+     ┌──────▼──────┐        ┌──────▼──────┐
+     │  Bastion    │        │  VM Public  │
+     │  Public IP  │        │     IP      │
+     └──────┬──────┘        └──────┬──────┘
+            │                      │
+     ┌──────▼──────┐        ┌──────▼──────┐
+     │   Azure     │   SSH  │    Linux    │
+     │   Bastion   │───────►│     VM      │
+     └─────────────┘        └─────────────┘
+     AzureBastionSubnet     VM Subnet
+        10.0.2.0/27         10.0.1.0/24
+
+                    VNet 10.0.0.0/16
 ```
 
-#### 2. backend.tf を編集
+## モジュール構成
+
+```
+stacks/dev/main.tf
+    │
+    ├── module "foundation" ← cloud/azure/foundation/
+    │     └─ Resource Group, VNet, Key Vault, Log Analytics
+    │
+    ├── module "network" ← cloud/azure/network/
+    │     └─ VM Subnet, AzureBastionSubnet, NAT Gateway, NSG
+    │
+    └── module "platform" ← cloud/azure/platform/
+          └─ VM, NIC, Public IPs, Bastion
+```
+
+## クイックスタート
+
+### 1. 前提条件
+
+- Terraform >= 1.7.0
+- Azure CLI (認証済み)
+- Terraform Cloud アカウント（推奨）
+- SSH公開鍵
+
+### 2. Terraform Cloud 設定
+
+1. Terraform Cloud で Organization 作成
+2. Workspace 作成 (`infra-dev`, `infra-stg`, `infra-prd`)
+3. 各 Workspace の Working Directory を設定:
+   - `infra-dev` → `stacks/dev`
+   - `infra-stg` → `stacks/stg`
+   - `infra-prd` → `stacks/prd`
+
+4. Environment Variables を設定:
+   ```
+   ARM_CLIENT_ID       = <Service Principal Client ID>
+   ARM_CLIENT_SECRET   = <Service Principal Secret> (Sensitive)
+   ARM_SUBSCRIPTION_ID = <Azure Subscription ID>
+   ARM_TENANT_ID       = <Azure Tenant ID>
+   ```
+
+5. Terraform Variables を設定:
+   ```
+   project        = "demo"
+   ssh_public_key = "ssh-rsa AAAA..."
+   ```
+
+### 3. backend.tf の更新
 
 ```hcl
 # stacks/dev/backend.tf
 terraform {
   cloud {
-    organization = "your-org"
+    organization = "your-org"  # ← 変更
     workspaces {
       name = "infra-dev"
     }
@@ -99,201 +100,93 @@ terraform {
 }
 ```
 
-#### 3. Workspace設定
-
-| 設定項目 | dev | stg | prd |
-|---------|-----|-----|-----|
-| Execution Mode | Remote | Remote | Remote |
-| Apply Method | Auto apply | Auto apply | **Manual apply** |
-| Working Directory | stacks/dev | stacks/stg | stacks/prd |
-
-#### 4. Variables設定
-
-Terraform Cloud UIで以下を設定:
-- `TF_VAR_environment`: dev / stg / prd
-- `TF_VAR_project`: your-project-name
-
-OIDC連携する場合は [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) を参照。
-
----
-
-### <a id="self-managed-backend"></a>自前Backend設定
-
-#### AWS (S3 + DynamoDB)
+### 4. デプロイ
 
 ```bash
-# Backend用リソース作成
-./scripts/setup-backend-aws.sh
-
-# backend.tf を編集
+cd stacks/dev
+terraform init
+terraform plan
+terraform apply
 ```
 
-```hcl
-# stacks/dev/backend.tf
-terraform {
-  backend "s3" {
-    bucket         = "your-org-terraform-state"
-    key            = "dev/terraform.tfstate"
-    region         = "ap-northeast-1"
-    encrypt        = true
-    dynamodb_table = "terraform-locks"
-  }
-}
+## Terraform Cloud Variables
+
+### 必須変数
+
+| 変数名 | 説明 | 例 |
+|--------|------|-----|
+| `project` | プロジェクト名 | `demo` |
+| `ssh_public_key` | SSH公開鍵 | `ssh-rsa AAAA...` |
+
+### オプション変数
+
+| 変数名 | デフォルト | 説明 |
+|--------|-----------|------|
+| `region` | `japaneast` | Azure リージョン |
+| `vm_size` | `Standard_B2s` | VM サイズ |
+| `admin_username` | `azureuser` | VM 管理者ユーザー名 |
+| `network_cidr` | `10.0.0.0/16` | VNet CIDR |
+
+## Outputs
+
+| 出力名 | 説明 |
+|--------|------|
+| `resource_group_name` | Resource Group 名 |
+| `vnet_id` | VNet ID |
+| `vm_public_ip` | VM パブリック IP |
+| `vm_private_ip` | VM プライベート IP |
+| `bastion_id` | Bastion ID |
+| `bastion_name` | Bastion 名 |
+
+## VM 接続方法
+
+### Azure Portal 経由
+
+1. Azure Portal で VM を開く
+2. 「接続」→「Bastion」を選択
+3. ユーザー名と SSH 秘密鍵を入力
+4. 「接続」をクリック
+
+### Azure CLI 経由
+
+```bash
+az network bastion ssh \
+  --name bas-demo-dev \
+  --resource-group rg-demo-dev \
+  --target-resource-id /subscriptions/.../virtualMachines/vm-demo-dev \
+  --auth-type ssh-key \
+  --username azureuser \
+  --ssh-key ~/.ssh/id_rsa
 ```
 
-#### Azure (Storage Account)
+## セキュリティ設計
 
-```hcl
-# stacks/dev/backend.tf
-terraform {
-  backend "azurerm" {
-    resource_group_name  = "rg-terraform-state"
-    storage_account_name = "stterraformstate"
-    container_name       = "tfstate"
-    key                  = "dev/terraform.tfstate"
-  }
-}
-```
+### NSG ルール
 
-#### GCP (Cloud Storage)
+| 方向 | ポート | ソース | 許可/拒否 |
+|------|--------|--------|----------|
+| Inbound | 22 | AzureBastionSubnet | Allow |
+| Inbound | 22 | Internet | **Deny** |
+| Inbound | 3389 | Internet | **Deny** |
 
-```hcl
-# stacks/dev/backend.tf
-terraform {
-  backend "gcs" {
-    bucket = "your-org-terraform-state"
-    prefix = "dev"
-  }
-}
-```
+- VM への SSH/RDP はインターネットから直接アクセス不可
+- Bastion 経由のみ管理アクセス可能
+- VM は Public IP を持つがインバウンドは制限
 
----
-
-### <a id="github-setup"></a>GitHub設定チェックリスト
-
-#### Secrets設定
-
-Settings > Secrets and variables > Actions
-
-**AWS使用時:**
-```
-AWS_ROLE_ARN_DEV:  arn:aws:iam::111111111111:role/github-actions-dev
-AWS_ROLE_ARN_STG:  arn:aws:iam::222222222222:role/github-actions-stg
-AWS_ROLE_ARN_PRD:  arn:aws:iam::333333333333:role/github-actions-prd
-```
-
-**Azure使用時:**
-```
-AZURE_CLIENT_ID:          xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-AZURE_TENANT_ID:          xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-AZURE_SUBSCRIPTION_ID_DEV: ...
-AZURE_SUBSCRIPTION_ID_STG: ...
-AZURE_SUBSCRIPTION_ID_PRD: ...
-```
-
-**GCP使用時:**
-```
-GCP_WORKLOAD_IDENTITY_PROVIDER: projects/xxx/locations/global/workloadIdentityPools/github/providers/github
-GCP_SERVICE_ACCOUNT_DEV: github-actions@project-dev.iam.gserviceaccount.com
-GCP_SERVICE_ACCOUNT_STG: github-actions@project-stg.iam.gserviceaccount.com
-GCP_SERVICE_ACCOUNT_PRD: github-actions@project-prd.iam.gserviceaccount.com
-```
-
-**Terraform Cloud使用時:**
-```
-TF_API_TOKEN: your-terraform-cloud-token
-```
-
-#### Environments作成
-
-Settings > Environments
-
-- [ ] `dev` - Deployment branches: All branches
-- [ ] `stg` - Deployment branches: main only
-- [ ] `prd` - Deployment branches: main only, **Required reviewers: 有効化**
-
-#### Branch Protection
-
-Settings > Branches > Add rule
-
-Branch name pattern: `main`
-
-- [x] Require a pull request before merging
-  - [x] Require approvals: 1
-  - [x] Require review from Code Owners
-- [x] Require status checks to pass
-  - Required: `terraform-plan`, `security-scan`, `lint`
-- [x] Do not allow bypassing the above settings
-
----
-
-## 🛡️ セキュリティ
-
-### 最小構成（必須）
-
-| ツール | 用途 | 実行タイミング |
-|--------|------|---------------|
-| tfsec | IaC脆弱性スキャン | PR時 |
-| Trivy | IaC + コンテナスキャン | PR時 |
-| TFLint | Terraform Linter | PR時 |
-| Dependabot | 依存関係更新 | 週次自動PR |
-| Secret Scanning | シークレット検出 | 常時 |
-
-### 拡張構成（推奨）
-
-| ツール | 用途 | 導入フェーズ |
-|--------|------|-------------|
-| Checkov | 追加IaCルール | Phase 2 |
-| Snyk / Grype | SCA強化 | Phase 2 |
-| SBOM (CycloneDX) | サプライチェーン | Phase 2 |
-| OPA / Sentinel | Policy as Code | Phase 2 |
-| KICS | マルチIaC対応 | Phase 3 |
-
----
-
-## 📋 運用ガイド
-
-### PRワークフロー
+## ディレクトリ構成
 
 ```
-1. feature branch作成
-2. コード変更
-3. PR作成 → 自動でPlan実行
-4. Plan結果をレビュー
-5. 承認 & マージ
-6. dev環境に自動デプロイ
+.
+├── cloud/azure/
+│   ├── foundation/     # RG, VNet, Key Vault, Log Analytics
+│   ├── network/        # Subnets, NAT Gateway, NSG
+│   └── platform/       # VM, Bastion, Public IPs
+├── stacks/
+│   ├── dev/            # 開発環境
+│   ├── stg/            # ステージング環境
+│   └── prd/            # 本番環境
+└── .claude/rules/      # Claude Code 設定
 ```
-
-### 環境昇格フロー
-
-```
-dev (自動デプロイ)
-    ↓ 動作確認OK
-stg (自動デプロイ)
-    ↓ 動作確認OK
-prd (手動承認 → デプロイ)
-```
-
-### Drift検知
-
-- 毎日09:00 JSTに自動実行
-- 差分検出時はSlack通知
-- 対応: PRを作成して修正、または手動変更を元に戻す
-
----
-
-## 🆘 トラブルシューティング
-
-→ [docs/RUNBOOK.md](docs/RUNBOOK.md)
-
-## 📚 詳細ドキュメント
-
-- [アーキテクチャ解説](docs/ARCHITECTURE.md)
-- [セキュリティガイド](docs/SECURITY.md)
-- [クイックスタート詳細](docs/QUICK_START.md)
-- [ADR一覧](docs/decisions/)
-
----
 
 ## License
 

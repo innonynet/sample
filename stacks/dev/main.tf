@@ -1,17 +1,16 @@
 # Dev Environment Stack
-# Entry point for dev environment infrastructure
+# Entry point for dev environment infrastructure (Azure)
 
 # =============================================================================
 # Foundation Layer
 # =============================================================================
 
 module "foundation" {
-  source = "../../cloud/aws/foundation"
-  # For Azure: source = "../../cloud/azure/foundation"
-  # For GCP:   source = "../../cloud/gcp/foundation"
+  source = "../../cloud/azure/foundation"
 
   environment  = var.environment
   project      = var.project
+  region       = var.region
   network_cidr = var.network_cidr
   repository   = var.repository
   tags         = var.tags
@@ -22,65 +21,66 @@ module "foundation" {
 # =============================================================================
 
 module "network" {
-  source = "../../cloud/aws/network"
-  # For Azure: source = "../../cloud/azure/network"
-  # For GCP:   source = "../../cloud/gcp/network"
+  source = "../../cloud/azure/network"
 
   environment         = var.environment
   project             = var.project
-  vpc_id              = module.foundation.vpc_id
+  region              = module.foundation.region
+  resource_group_name = module.foundation.resource_group_name
+  vnet_name           = module.foundation.vnet_name
   network_cidr        = var.network_cidr
-  internet_gateway_id = module.foundation.internet_gateway_id
-  availability_zones  = module.foundation.availability_zones
-
-  # For Azure, use these instead:
-  # region              = module.foundation.region
-  # resource_group_name = module.foundation.resource_group_name
-  # vnet_name           = module.foundation.vnet_name
-
-  # For GCP, use these instead:
-  # region      = module.foundation.region
-  # vpc_name    = module.foundation.vpc_name
-  # router_name = module.foundation.router_name
 }
 
 # =============================================================================
-# Platform Layer (Optional - uncomment when ready)
+# Platform Layer
 # =============================================================================
 
-# module "platform" {
-#   source = "../../cloud/aws/platform"
-#
-#   environment        = var.environment
-#   project            = var.project
-#   vpc_id             = module.foundation.vpc_id
-#   public_subnet_ids  = module.network.public_subnet_ids
-#   private_subnet_ids = module.network.private_subnet_ids
-#   kms_key_arn        = module.foundation.kms_key_arn
-# }
+module "platform" {
+  source = "../../cloud/azure/platform"
+
+  environment         = var.environment
+  project             = var.project
+  region              = module.foundation.region
+  resource_group_name = module.foundation.resource_group_name
+  vm_subnet_id        = module.network.vm_subnet_id
+  bastion_subnet_id   = module.network.bastion_subnet_id
+  admin_username      = var.admin_username
+  ssh_public_key      = var.ssh_public_key
+  vm_size             = var.vm_size
+}
 
 # =============================================================================
 # Outputs
 # =============================================================================
 
-output "vpc_id" {
-  value       = module.foundation.vpc_id
-  description = "VPC ID"
+output "resource_group_name" {
+  value       = module.foundation.resource_group_name
+  description = "Resource Group name"
 }
 
-output "vpc_cidr" {
-  value       = module.foundation.vpc_cidr
-  description = "VPC CIDR"
+output "vnet_id" {
+  value       = module.foundation.vnet_id
+  description = "VNet ID"
 }
 
-output "public_subnet_ids" {
-  value       = module.network.public_subnet_ids
-  description = "Public subnet IDs"
+output "vm_public_ip" {
+  value       = module.platform.vm_public_ip
+  description = "VM public IP address"
 }
 
-output "private_subnet_ids" {
-  value       = module.network.private_subnet_ids
-  description = "Private subnet IDs"
+output "vm_private_ip" {
+  value       = module.platform.vm_private_ip
+  description = "VM private IP address"
+}
+
+output "bastion_id" {
+  value       = module.platform.bastion_id
+  description = "Bastion host ID"
+}
+
+output "bastion_name" {
+  value       = module.platform.bastion_name
+  description = "Bastion host name"
 }
 
 output "environment" {

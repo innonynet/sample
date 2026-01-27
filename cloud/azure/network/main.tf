@@ -1,5 +1,5 @@
 # Azure Network Module
-# Creates subnets, NAT Gateway, NSGs
+# Creates subnets (VM, Bastion), NAT Gateway, NSGs
 
 terraform {
   required_version = ">= 1.7.0"
@@ -21,37 +21,37 @@ locals {
     Project     = var.project
     ManagedBy   = "terraform"
   }
+
+  # Subnet CIDR calculations
+  # network_cidr: 10.0.0.0/16
+  # vm_subnet:      10.0.1.0/24 (cidrsubnet /16 + 8 bits = /24, index 1)
+  # bastion_subnet: 10.0.2.0/27 (cidrsubnet /16 + 11 bits = /27, index 64)
+  vm_subnet_cidr      = cidrsubnet(var.network_cidr, 8, 1)   # /24
+  bastion_subnet_cidr = cidrsubnet(var.network_cidr, 11, 64) # /27
 }
 
 # =============================================================================
 # Subnets
 # =============================================================================
 
-resource "azurerm_subnet" "public" {
-  name                 = "snet-${var.project}-${var.environment}-public"
+# VM Subnet
+resource "azurerm_subnet" "vm" {
+  name                 = "snet-${var.project}-${var.environment}-vm"
   resource_group_name  = var.resource_group_name
   virtual_network_name = var.vnet_name
-  address_prefixes     = [cidrsubnet(var.network_cidr, 4, 0)]
+  address_prefixes     = [local.vm_subnet_cidr]
 }
 
-resource "azurerm_subnet" "private" {
-  name                 = "snet-${var.project}-${var.environment}-private"
+# AzureBastionSubnet (name must be exactly "AzureBastionSubnet")
+resource "azurerm_subnet" "bastion" {
+  name                 = "AzureBastionSubnet"
   resource_group_name  = var.resource_group_name
   virtual_network_name = var.vnet_name
-  address_prefixes     = [cidrsubnet(var.network_cidr, 4, 4)]
-}
-
-resource "azurerm_subnet" "database" {
-  name                 = "snet-${var.project}-${var.environment}-database"
-  resource_group_name  = var.resource_group_name
-  virtual_network_name = var.vnet_name
-  address_prefixes     = [cidrsubnet(var.network_cidr, 4, 8)]
-
-  service_endpoints = ["Microsoft.Sql", "Microsoft.Storage"]
+  address_prefixes     = [local.bastion_subnet_cidr]
 }
 
 # =============================================================================
-# NAT Gateway
+# NAT Gateway (for VM outbound internet access)
 # =============================================================================
 
 resource "azurerm_public_ip" "nat" {
@@ -79,8 +79,8 @@ resource "azurerm_nat_gateway_public_ip_association" "main" {
   public_ip_address_id = azurerm_public_ip.nat.id
 }
 
-resource "azurerm_subnet_nat_gateway_association" "private" {
-  subnet_id      = azurerm_subnet.private.id
+resource "azurerm_subnet_nat_gateway_association" "vm" {
+  subnet_id      = azurerm_subnet.vm.id
   nat_gateway_id = azurerm_nat_gateway.main.id
 }
 
@@ -88,52 +88,55 @@ resource "azurerm_subnet_nat_gateway_association" "private" {
 # Network Security Groups
 # =============================================================================
 
-resource "azurerm_network_security_group" "public" {
-  name                = "nsg-${var.project}-${var.environment}-public"
+# NSG for VM subnet
+resource "azurerm_network_security_group" "vm" {
+  name                = "nsg-${var.project}-${var.environment}-vm"
   location            = var.region
   resource_group_name = var.resource_group_name
 
+  # Allow SSH from Bastion subnet only
   security_rule {
-    name                       = "AllowHTTPS"
+    name                       = "AllowSSHFromBastion"
     priority                   = 100
     direction                  = "Inbound"
     access                     = "Allow"
     protocol                   = "Tcp"
     source_port_range          = "*"
-    destination_port_range     = "443"
-    source_address_prefix      = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = local.bastion_subnet_cidr
+    destination_address_prefix = "*"
+  }
+
+  # Deny SSH from Internet (explicit deny for clarity)
+  security_rule {
+    name                       = "DenySSHFromInternet"
+    priority                   = 200
+    direction                  = "Inbound"
+    access                     = "Deny"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = "Internet"
+    destination_address_prefix = "*"
+  }
+
+  # Deny RDP from Internet
+  security_rule {
+    name                       = "DenyRDPFromInternet"
+    priority                   = 210
+    direction                  = "Inbound"
+    access                     = "Deny"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "3389"
+    source_address_prefix      = "Internet"
     destination_address_prefix = "*"
   }
 
   tags = local.common_tags
 }
 
-resource "azurerm_network_security_group" "private" {
-  name                = "nsg-${var.project}-${var.environment}-private"
-  location            = var.region
-  resource_group_name = var.resource_group_name
-
-  security_rule {
-    name                       = "AllowVNetInbound"
-    priority                   = 100
-    direction                  = "Inbound"
-    access                     = "Allow"
-    protocol                   = "*"
-    source_port_range          = "*"
-    destination_port_range     = "*"
-    source_address_prefix      = "VirtualNetwork"
-    destination_address_prefix = "VirtualNetwork"
-  }
-
-  tags = local.common_tags
-}
-
-resource "azurerm_subnet_network_security_group_association" "public" {
-  subnet_id                 = azurerm_subnet.public.id
-  network_security_group_id = azurerm_network_security_group.public.id
-}
-
-resource "azurerm_subnet_network_security_group_association" "private" {
-  subnet_id                 = azurerm_subnet.private.id
-  network_security_group_id = azurerm_network_security_group.private.id
+resource "azurerm_subnet_network_security_group_association" "vm" {
+  subnet_id                 = azurerm_subnet.vm.id
+  network_security_group_id = azurerm_network_security_group.vm.id
 }
