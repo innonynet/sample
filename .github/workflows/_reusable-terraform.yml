@@ -57,7 +57,7 @@ jobs:
       # AWS OIDC Authentication
       - name: Configure AWS Credentials
         if: inputs.cloud == 'aws'
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ vars[format('AWS_ROLE_ARN_{0}', inputs.environment)] }}
           aws-region: ap-northeast-1
