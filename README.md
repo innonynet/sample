@@ -1,8 +1,9 @@
 # Azure VM + Bastion Infrastructure
 
-> Azure上にVM + Bastion構成を構築するTerraformテンプレート
+> Azure上にセキュアなVM + Bastion構成を構築するTerraformテンプレート
 
 [![Terraform](https://img.shields.io/badge/Terraform-%3E%3D1.7-blue.svg)](https://www.terraform.io/)
+[![Security Scan](https://github.com/innonynet/sample/actions/workflows/security-scan.yml/badge.svg)](https://github.com/innonynet/sample/actions/workflows/security-scan.yml)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ## 概要
@@ -12,32 +13,44 @@
 - **Resource Group** - リソース管理グループ
 - **Virtual Network / Subnets** - VM用サブネット + AzureBastionSubnet
 - **Network Security Group** - 22/3389をインターネットから遮断、Bastion経由のみ許可
-- **Public IP (VM用)** - VMのインターネット通信用
+- **NAT Gateway** - VMのアウトバウンド通信用（固定IP）
 - **Public IP (Bastion用)** - Bastion接続用
-- **Linux VM** - Ubuntu 22.04 LTS
+- **Linux VM** - Ubuntu 22.04 LTS（Private IPのみ）
 - **Azure Bastion** - セキュアな管理アクセス
+- **Key Vault** - シークレット管理
+- **Log Analytics** - ログ収集
 
 ## アーキテクチャ
 
 ```
-                    Internet
-                        │
-            ┌───────────┴───────────┐
-            │                       │
-     ┌──────▼──────┐        ┌──────▼──────┐
-     │  Bastion    │        │  VM Public  │
-     │  Public IP  │        │     IP      │
-     └──────┬──────┘        └──────┬──────┘
-            │                      │
-     ┌──────▼──────┐        ┌──────▼──────┐
-     │   Azure     │   SSH  │    Linux    │
-     │   Bastion   │───────►│     VM      │
-     └─────────────┘        └─────────────┘
-     AzureBastionSubnet     VM Subnet
-        10.0.2.0/27         10.0.1.0/24
+                         Internet
+                             │
+              ┌──────────────┼──────────────┐
+              │              │              │
+              ▼              │              │
+        ┌──────────┐         │              │
+        │ Bastion  │         │              │
+        │Public IP │         │              │
+        └────┬─────┘         │              │
+             │               │              │
+             ▼               │              ▼
+        ┌──────────┐         │        ┌──────────┐
+        │  Bastion │         │        │   NAT    │
+        └────┬─────┘         │        │ Gateway  │
+             │               │        └────▲─────┘
+             │ SSH           │             │
+             ▼               │             │
+        ┌──────────┐         │             │
+        │    VM    │─────────────Outbound──┘
+        │(Private) │
+        └──────────┘
 
-                    VNet 10.0.0.0/16
+              VNet 10.0.0.0/16
 ```
+
+**通信フロー:**
+- **Inbound (管理):** Internet → Bastion Public IP → Bastion → VM
+- **Outbound:** VM → NAT Gateway → Internet
 
 ## モジュール構成
 
@@ -51,7 +64,7 @@ stacks/dev/main.tf
     │     └─ VM Subnet, AzureBastionSubnet, NAT Gateway, NSG
     │
     └── module "platform" ← cloud/azure/platform/
-          └─ VM, NIC, Public IPs, Bastion
+          └─ VM, NIC, Bastion, Public IP (Bastion用)
 ```
 
 ## クイックスタート
@@ -60,8 +73,8 @@ stacks/dev/main.tf
 
 - Terraform >= 1.7.0
 - Azure CLI (認証済み)
-- Terraform Cloud アカウント（推奨）
-- SSH公開鍵
+- Terraform Cloud アカウント
+- SSH公開鍵（RSA形式）
 
 ### 2. Terraform Cloud 設定
 
@@ -100,8 +113,17 @@ terraform {
 }
 ```
 
-### 4. デプロイ
+### 4. GitHub Secrets の設定
 
+```
+TF_API_TOKEN = <Terraform Cloud API Token>
+```
+
+### 5. デプロイ
+
+VCS連携の場合、`main`ブランチへのpushで自動デプロイ。
+
+手動の場合:
 ```bash
 cd stacks/dev
 terraform init
@@ -109,21 +131,21 @@ terraform plan
 terraform apply
 ```
 
-## Terraform Cloud Variables
+## Terraform Variables
 
 ### 必須変数
 
 | 変数名 | 説明 | 例 |
 |--------|------|-----|
 | `project` | プロジェクト名 | `demo` |
-| `ssh_public_key` | SSH公開鍵 | `ssh-rsa AAAA...` |
+| `ssh_public_key` | SSH公開鍵（RSA形式） | `ssh-rsa AAAA...` |
 
 ### オプション変数
 
 | 変数名 | デフォルト | 説明 |
 |--------|-----------|------|
 | `region` | `japaneast` | Azure リージョン |
-| `vm_size` | `Standard_B2s` | VM サイズ |
+| `vm_size` | `Standard_D2s_v3` | VM サイズ |
 | `admin_username` | `azureuser` | VM 管理者ユーザー名 |
 | `network_cidr` | `10.0.0.0/16` | VNet CIDR |
 
@@ -133,7 +155,6 @@ terraform apply
 |--------|------|
 | `resource_group_name` | Resource Group 名 |
 | `vnet_id` | VNet ID |
-| `vm_public_ip` | VM パブリック IP |
 | `vm_private_ip` | VM プライベート IP |
 | `bastion_id` | Bastion ID |
 | `bastion_name` | Bastion 名 |
@@ -153,11 +174,33 @@ terraform apply
 az network bastion ssh \
   --name bas-demo-dev \
   --resource-group rg-demo-dev \
-  --target-resource-id /subscriptions/.../virtualMachines/vm-demo-dev \
+  --target-resource-id /subscriptions/<subscription-id>/resourceGroups/rg-demo-dev/providers/Microsoft.Compute/virtualMachines/vm-demo-dev \
   --auth-type ssh-key \
   --username azureuser \
   --ssh-key ~/.ssh/id_rsa
 ```
+
+## CI/CD
+
+### GitHub Actions ワークフロー
+
+| ワークフロー | トリガー | 内容 |
+|-------------|---------|------|
+| **Security Scan** | Push, PR | TFLint + Trivy によるセキュリティスキャン |
+| **Drift Detection** | 毎日 09:00 JST | インフラのドリフト検知 |
+
+### セキュリティスキャン
+
+- **TFLint**: Terraform ベストプラクティス、Azure ルールセット
+- **Trivy**: IaC 脆弱性スキャン（HIGH/CRITICAL でブロック）
+
+結果は GitHub Security タブで確認可能。
+
+### ドリフト検知
+
+- 毎日自動実行
+- ドリフト検知時は GitHub Issue を自動作成
+- 手動実行も可能（Actions → Drift Detection → Run workflow）
 
 ## セキュリティ設計
 
@@ -169,23 +212,31 @@ az network bastion ssh \
 | Inbound | 22 | Internet | **Deny** |
 | Inbound | 3389 | Internet | **Deny** |
 
-- VM への SSH/RDP はインターネットから直接アクセス不可
-- Bastion 経由のみ管理アクセス可能
-- VM は Public IP を持つがインバウンドは制限
+### セキュリティポイント
+
+- VM は Private IP のみ（インターネットから直接アクセス不可）
+- 管理アクセスは Bastion 経由のみ
+- アウトバウンド通信は NAT Gateway 経由（固定IP）
+- Key Vault はネットワーク制限あり（Azure Services のみ）
 
 ## ディレクトリ構成
 
 ```
 .
+├── .github/workflows/
+│   ├── drift-detection.yml  # ドリフト検知
+│   └── security-scan.yml    # セキュリティスキャン
 ├── cloud/azure/
-│   ├── foundation/     # RG, VNet, Key Vault, Log Analytics
-│   ├── network/        # Subnets, NAT Gateway, NSG
-│   └── platform/       # VM, Bastion, Public IPs
+│   ├── foundation/          # RG, VNet, Key Vault, Log Analytics
+│   ├── network/             # Subnets, NAT Gateway, NSG
+│   └── platform/            # VM, Bastion
 ├── stacks/
-│   ├── dev/            # 開発環境
-│   ├── stg/            # ステージング環境
-│   └── prd/            # 本番環境
-└── .claude/rules/      # Claude Code 設定
+│   ├── dev/                 # 開発環境
+│   ├── stg/                 # ステージング環境
+│   └── prd/                 # 本番環境
+├── .tflint.hcl              # TFLint 設定
+├── .trivyignore             # Trivy 除外設定
+└── .claude/rules/           # Claude Code 設定
 ```
 
 ## License
