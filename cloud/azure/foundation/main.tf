@@ -8,6 +8,16 @@
 data "azurerm_client_config" "current" {}
 
 # =============================================================================
+# Random Suffix for globally unique names
+# =============================================================================
+
+resource "random_string" "suffix" {
+  length  = 6
+  special = false
+  upper   = false
+}
+
+# =============================================================================
 # Local Variables
 # =============================================================================
 
@@ -59,7 +69,7 @@ resource "azurerm_virtual_network" "main" {
 # =============================================================================
 
 resource "azurerm_key_vault" "main" {
-  name                = "kv-${var.project}-${var.environment}"
+  name                = "kv-${var.project}-${var.environment}-${random_string.suffix.result}"
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
   tenant_id           = data.azurerm_client_config.current.tenant_id
