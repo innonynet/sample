@@ -1,0 +1,6 @@
+# Trivy Ignore File
+# Add CVE IDs or rule IDs to ignore (one per line)
+# Format: CVE-XXXX-XXXXX or AVD-XXX-XXXX
+
+# Example: Ignore specific findings with justification
+# AVD-AZU-0001  # Accepted risk: Key Vault network ACLs configured separately
