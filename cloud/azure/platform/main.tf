@@ -24,20 +24,6 @@ locals {
 }
 
 # =============================================================================
-# Public IP for VM
-# =============================================================================
-
-resource "azurerm_public_ip" "vm" {
-  name                = "pip-${var.project}-${var.environment}-vm"
-  location            = var.region
-  resource_group_name = var.resource_group_name
-  allocation_method   = "Static"
-  sku                 = "Standard"
-
-  tags = local.common_tags
-}
-
-# =============================================================================
 # Public IP for Bastion
 # =============================================================================
 
@@ -64,7 +50,6 @@ resource "azurerm_network_interface" "vm" {
     name                          = "internal"
     subnet_id                     = var.vm_subnet_id
     private_ip_address_allocation = "Dynamic"
-    public_ip_address_id          = azurerm_public_ip.vm.id
   }
 
   tags = local.common_tags

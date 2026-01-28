@@ -64,11 +64,6 @@ output "vnet_id" {
   description = "VNet ID"
 }
 
-output "vm_public_ip" {
-  value       = module.platform.vm_public_ip
-  description = "VM public IP address"
-}
-
 output "vm_private_ip" {
   value       = module.platform.vm_private_ip
   description = "VM private IP address"
