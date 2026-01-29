@@ -1,0 +1,8 @@
+{
+  "tags": [
+    "Environment",
+    "Project",
+    "ManagedBy"
+  ],
+  "description": "Required tags for all Azure resources to ensure proper governance and cost allocation."
+}

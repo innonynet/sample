@@ -1,0 +1,61 @@
+{
+  "properties": {
+    "displayName": "Deny Public IP except for Bastion and NAT Gateway",
+    "description": "This policy denies creation of Public IP addresses unless they are for Azure Bastion or NAT Gateway resources.",
+    "mode": "All",
+    "metadata": {
+      "version": "1.0.0",
+      "category": "Network"
+    },
+    "parameters": {
+      "effect": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Effect",
+          "description": "Enable or disable the execution of the policy"
+        },
+        "allowedValues": [
+          "Audit",
+          "Deny",
+          "Disabled"
+        ],
+        "defaultValue": "Audit"
+      },
+      "allowedNamePatterns": {
+        "type": "Array",
+        "metadata": {
+          "displayName": "Allowed Name Patterns",
+          "description": "List of allowed name patterns for Public IPs (e.g., bastion, nat)"
+        },
+        "defaultValue": [
+          "*bastion*",
+          "*nat*"
+        ]
+      }
+    },
+    "policyRule": {
+      "if": {
+        "allOf": [
+          {
+            "field": "type",
+            "equals": "Microsoft.Network/publicIPAddresses"
+          },
+          {
+            "count": {
+              "value": "[parameters('allowedNamePatterns')]",
+              "name": "pattern",
+              "where": {
+                "field": "name",
+                "like": "[current('pattern')]"
+              }
+            },
+            "equals": 0
+          }
+        ]
+      },
+      "then": {
+        "effect": "[parameters('effect')]"
+      }
+    }
+  }
+}

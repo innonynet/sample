@@ -1,0 +1,70 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cloud/**/*.tf'
+      - 'stacks/**/*.tf'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'cloud/**/*.tf'
+      - 'stacks/**/*.tf'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  terraform-docs:
+    name: Generate Terraform Docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Generate module documentation
+        uses: terraform-docs/gh-actions@v1
+        with:
+          working-dir: cloud/azure/foundation,cloud/azure/network,cloud/azure/platform,cloud/azure/governance,cloud/azure/observability
+          output-file: README.md
+          output-method: inject
+          git-push: ${{ github.event_name == 'push' }}
+          git-push-user-name: "github-actions[bot]"
+          git-push-user-email: "github-actions[bot]@users.noreply.github.com"
+          git-commit-message: "docs: Update Terraform module documentation"
+
+      - name: Generate stack documentation
+        uses: terraform-docs/gh-actions@v1
+        with:
+          working-dir: stacks/dev,stacks/stg,stacks/prd
+          output-file: README.md
+          output-method: inject
+          git-push: ${{ github.event_name == 'push' }}
+          git-push-user-name: "github-actions[bot]"
+          git-push-user-email: "github-actions[bot]@users.noreply.github.com"
+          git-commit-message: "docs: Update stack documentation"
+
+      - name: Add summary
+        run: |
+          echo "## Documentation Update" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "terraform-docs has generated/updated documentation for:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Modules" >> $GITHUB_STEP_SUMMARY
+          echo "- cloud/azure/foundation" >> $GITHUB_STEP_SUMMARY
+          echo "- cloud/azure/network" >> $GITHUB_STEP_SUMMARY
+          echo "- cloud/azure/platform" >> $GITHUB_STEP_SUMMARY
+          echo "- cloud/azure/governance" >> $GITHUB_STEP_SUMMARY
+          echo "- cloud/azure/observability" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Stacks" >> $GITHUB_STEP_SUMMARY
+          echo "- stacks/dev" >> $GITHUB_STEP_SUMMARY
+          echo "- stacks/stg" >> $GITHUB_STEP_SUMMARY
+          echo "- stacks/prd" >> $GITHUB_STEP_SUMMARY

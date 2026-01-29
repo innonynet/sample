@@ -1,0 +1,71 @@
+{
+  "properties": {
+    "displayName": "Require mandatory tags on resources",
+    "description": "This policy requires Environment, Project, and ManagedBy tags on all resources.",
+    "mode": "Indexed",
+    "metadata": {
+      "version": "1.0.0",
+      "category": "Tags"
+    },
+    "parameters": {
+      "effect": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Effect",
+          "description": "Enable or disable the execution of the policy"
+        },
+        "allowedValues": [
+          "Audit",
+          "Deny",
+          "Disabled"
+        ],
+        "defaultValue": "Audit"
+      },
+      "tagName1": {
+        "type": "String",
+        "metadata": {
+          "displayName": "First Required Tag Name",
+          "description": "Name of the first required tag"
+        },
+        "defaultValue": "Environment"
+      },
+      "tagName2": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Second Required Tag Name",
+          "description": "Name of the second required tag"
+        },
+        "defaultValue": "Project"
+      },
+      "tagName3": {
+        "type": "String",
+        "metadata": {
+          "displayName": "Third Required Tag Name",
+          "description": "Name of the third required tag"
+        },
+        "defaultValue": "ManagedBy"
+      }
+    },
+    "policyRule": {
+      "if": {
+        "anyOf": [
+          {
+            "field": "[concat('tags[', parameters('tagName1'), ']')]",
+            "exists": "false"
+          },
+          {
+            "field": "[concat('tags[', parameters('tagName2'), ']')]",
+            "exists": "false"
+          },
+          {
+            "field": "[concat('tags[', parameters('tagName3'), ']')]",
+            "exists": "false"
+          }
+        ]
+      },
+      "then": {
+        "effect": "[parameters('effect')]"
+      }
+    }
+  }
+}

@@ -53,3 +53,17 @@ variable "vm_size" {
   description = "VM size"
   default     = "Standard_D2s_v3"
 }
+
+# Observability variables
+
+variable "enable_observability" {
+  type        = bool
+  description = "Enable observability module (alerts, action groups)"
+  default     = true
+}
+
+variable "oncall_email" {
+  type        = string
+  description = "On-call email address for alert notifications"
+  default     = ""
+}

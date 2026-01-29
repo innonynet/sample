@@ -1,0 +1,17 @@
+# Conftest configuration for Terraform policy checks
+
+[policy]
+# Path to Rego policy files
+path = "terraform"
+
+# Path to data files
+data = "data"
+
+# Output format
+output = "stdout"
+
+# Fail on warnings
+fail-on-warn = false
+
+# Namespace for policies
+namespace = "terraform.azure"

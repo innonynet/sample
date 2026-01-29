@@ -1,0 +1,11 @@
+# {{ cookiecutter.env | capitalize }} Environment - Terraform Cloud Backend
+
+terraform {
+  cloud {
+    organization = "{{ cookiecutter.terraform_cloud_org }}"
+
+    workspaces {
+      name = "{{ cookiecutter.terraform_cloud_workspace_prefix }}-{{ cookiecutter.env }}"
+    }
+  }
+}

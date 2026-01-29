@@ -1,26 +1,27 @@
-# Stg Environment - Variables
+# {{ cookiecutter.env | capitalize }} Environment - Variables
 
 variable "environment" {
   type        = string
   description = "Environment name"
-  default     = "stg"
+  default     = "{{ cookiecutter.env }}"
 }
 
 variable "project" {
   type        = string
   description = "Project name"
+  default     = "{{ cookiecutter.project_name }}"
 }
 
 variable "region" {
   type        = string
   description = "Azure region"
-  default     = "japaneast"
+  default     = "{{ cookiecutter.region }}"
 }
 
 variable "network_cidr" {
   type        = string
   description = "Network CIDR block"
-  default     = "10.1.0.0/16"
+  default     = "{{ cookiecutter.network_cidr }}"
 }
 
 variable "repository" {
@@ -51,19 +52,19 @@ variable "ssh_public_key" {
 variable "vm_size" {
   type        = string
   description = "VM size"
-  default     = "Standard_D2s_v3"
+  default     = "{{ cookiecutter.vm_size }}"
 }
 
 # Observability variables
 
 variable "enable_observability" {
   type        = bool
-  description = "Enable observability module (alerts, action groups)"
+  description = "Enable observability module"
   default     = true
 }
 
 variable "oncall_email" {
   type        = string
-  description = "On-call email address for alert notifications"
+  description = "On-call email for alert notifications"
   default     = ""
 }

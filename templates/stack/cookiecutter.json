@@ -1,0 +1,9 @@
+{
+  "project_name": "demo",
+  "env": "dev",
+  "region": "japaneast",
+  "network_cidr": "10.0.0.0/16",
+  "vm_size": "Standard_D2s_v3",
+  "terraform_cloud_org": "your-org",
+  "terraform_cloud_workspace_prefix": "infra"
+}

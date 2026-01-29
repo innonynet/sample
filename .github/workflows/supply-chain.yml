@@ -1,0 +1,396 @@
+name: Supply Chain Security
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cloud/**'
+      - 'stacks/**'
+      - '.terraform.lock.hcl'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'cloud/**'
+      - 'stacks/**'
+      - '.terraform.lock.hcl'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  attestations: write
+  packages: write
+
+env:
+  COSIGN_EXPERIMENTAL: 1
+
+jobs:
+  # ==========================================================================
+  # Lockfile Verification
+  # ==========================================================================
+  lockfile-verify:
+    name: Verify Lockfile Integrity
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Verify Lockfiles
+        run: |
+          echo "## Lockfile Verification Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          FAILED=0
+
+          for stack_dir in stacks/*/; do
+            stack_name=$(basename "$stack_dir")
+            echo "### Stack: $stack_name" >> $GITHUB_STEP_SUMMARY
+
+            cd "$stack_dir"
+
+            # Check if lockfile exists
+            if [ ! -f ".terraform.lock.hcl" ]; then
+              echo "- Warning: No lockfile found" >> $GITHUB_STEP_SUMMARY
+              cd - > /dev/null
+              continue
+            fi
+
+            # Initialize and verify lockfile
+            terraform init -backend=false -upgrade=false 2>&1 | tee init_output.txt
+
+            if grep -q "Terraform has made changes to the lock file" init_output.txt; then
+              echo "- Error: Lockfile out of sync. Run 'terraform init -upgrade' locally." >> $GITHUB_STEP_SUMMARY
+              FAILED=1
+            else
+              echo "- Lockfile verified successfully" >> $GITHUB_STEP_SUMMARY
+            fi
+
+            rm -f init_output.txt
+            cd - > /dev/null
+          done
+
+          if [ $FAILED -eq 1 ]; then
+            echo ""
+            echo "::error::Lockfile verification failed. Provider versions may have changed."
+            exit 1
+          fi
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All lockfiles verified successfully." >> $GITHUB_STEP_SUMMARY
+
+  # ==========================================================================
+  # SBOM Generation
+  # ==========================================================================
+  sbom-generation:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    needs: [lockfile-verify]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Install CycloneDX CLI
+        run: |
+          wget -q https://github.com/CycloneDX/cyclonedx-cli/releases/download/v0.25.0/cyclonedx-linux-x64
+          chmod +x cyclonedx-linux-x64
+          sudo mv cyclonedx-linux-x64 /usr/local/bin/cyclonedx
+
+      - name: Generate Terraform Provider SBOM
+        run: |
+          mkdir -p sbom
+
+          # Create SBOM header
+          cat > sbom/terraform-providers.json << 'EOF'
+          {
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.5",
+            "version": 1,
+            "metadata": {
+              "timestamp": "TIMESTAMP_PLACEHOLDER",
+              "tools": [
+                {
+                  "vendor": "Terraform",
+                  "name": "terraform-lockfile-parser",
+                  "version": "1.0.0"
+                }
+              ],
+              "component": {
+                "type": "application",
+                "name": "azure-vm-bastion-infrastructure",
+                "version": "1.0.0"
+              }
+            },
+            "components": []
+          }
+          EOF
+
+          # Update timestamp
+          sed -i "s/TIMESTAMP_PLACEHOLDER/$(date -u +%Y-%m-%dT%H:%M:%SZ)/" sbom/terraform-providers.json
+
+          # Parse lockfiles and extract provider information
+          COMPONENTS="[]"
+
+          for stack_dir in stacks/*/; do
+            if [ -f "${stack_dir}.terraform.lock.hcl" ]; then
+              # Extract provider info from lockfile
+              while IFS= read -r line; do
+                if [[ $line =~ provider.*\"(.*)\" ]]; then
+                  PROVIDER="${BASH_REMATCH[1]}"
+                fi
+                if [[ $line =~ version.*=.*\"(.*)\" ]]; then
+                  VERSION="${BASH_REMATCH[1]}"
+                  if [ -n "$PROVIDER" ] && [ -n "$VERSION" ]; then
+                    COMPONENT=$(cat <<COMP
+          {
+            "type": "library",
+            "name": "$PROVIDER",
+            "version": "$VERSION",
+            "purl": "pkg:terraform/$PROVIDER@$VERSION"
+          }
+          COMP
+                    )
+                    COMPONENTS=$(echo "$COMPONENTS" | jq ". + [$COMPONENT]" 2>/dev/null || echo "$COMPONENTS")
+                    PROVIDER=""
+                    VERSION=""
+                  fi
+                fi
+              done < "${stack_dir}.terraform.lock.hcl"
+            fi
+          done
+
+          # Update SBOM with unique components
+          UNIQUE_COMPONENTS=$(echo "$COMPONENTS" | jq 'unique_by(.purl)')
+          jq ".components = $UNIQUE_COMPONENTS" sbom/terraform-providers.json > sbom/terraform-providers-final.json
+          mv sbom/terraform-providers-final.json sbom/terraform-providers.json
+
+          echo "## SBOM Generation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Generated CycloneDX SBOM with the following components:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+          jq '.components[] | "\(.name)@\(.version)"' sbom/terraform-providers.json >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+      - name: Convert to SPDX format
+        run: |
+          # Create SPDX format SBOM
+          cat > sbom/terraform-providers.spdx.json << EOF
+          {
+            "spdxVersion": "SPDX-2.3",
+            "dataLicense": "CC0-1.0",
+            "SPDXID": "SPDXRef-DOCUMENT",
+            "name": "azure-vm-bastion-infrastructure",
+            "documentNamespace": "https://github.com/${{ github.repository }}/sbom/$(date +%Y%m%d)",
+            "creationInfo": {
+              "created": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+              "creators": ["Tool: github-actions-sbom-generator-1.0.0"]
+            },
+            "packages": $(jq '[.components[] | {
+              "SPDXID": ("SPDXRef-Package-" + (.name | gsub("/"; "-"))),
+              "name": .name,
+              "versionInfo": .version,
+              "downloadLocation": "NOASSERTION",
+              "filesAnalyzed": false
+            }]' sbom/terraform-providers.json)
+          }
+          EOF
+
+      - name: Upload SBOM Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
+          retention-days: 90
+
+  # ==========================================================================
+  # Artifact Signing (Cosign Keyless)
+  # ==========================================================================
+  artifact-signing:
+    name: Sign Artifacts
+    runs-on: ubuntu-latest
+    needs: [sbom-generation]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download SBOM
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign SBOM with Cosign (Keyless)
+        run: |
+          echo "## Artifact Signing" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Sign the CycloneDX SBOM
+          cosign sign-blob --yes \
+            --output-signature sbom/terraform-providers.json.sig \
+            --output-certificate sbom/terraform-providers.json.cert \
+            sbom/terraform-providers.json
+
+          echo "- Signed: terraform-providers.json" >> $GITHUB_STEP_SUMMARY
+
+          # Sign the SPDX SBOM
+          cosign sign-blob --yes \
+            --output-signature sbom/terraform-providers.spdx.json.sig \
+            --output-certificate sbom/terraform-providers.spdx.json.cert \
+            sbom/terraform-providers.spdx.json
+
+          echo "- Signed: terraform-providers.spdx.json" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "All artifacts signed with Sigstore Cosign (keyless)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Signed Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-signed
+          path: sbom/
+          retention-days: 90
+
+  # ==========================================================================
+  # SLSA Provenance Generation
+  # ==========================================================================
+  provenance:
+    name: Generate SLSA Provenance
+    runs-on: ubuntu-latest
+    needs: [artifact-signing]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Signed SBOM
+        uses: actions/download-artifact@v4
+        with:
+          name: sbom-signed
+          path: sbom/
+
+      - name: Generate SLSA Provenance
+        run: |
+          mkdir -p provenance
+
+          # Generate SLSA v1.0 Provenance
+          cat > provenance/slsa-provenance.json << EOF
+          {
+            "_type": "https://in-toto.io/Statement/v1",
+            "subject": [
+              {
+                "name": "terraform-providers.json",
+                "digest": {
+                  "sha256": "$(sha256sum sbom/terraform-providers.json | cut -d' ' -f1)"
+                }
+              },
+              {
+                "name": "terraform-providers.spdx.json",
+                "digest": {
+                  "sha256": "$(sha256sum sbom/terraform-providers.spdx.json | cut -d' ' -f1)"
+                }
+              }
+            ],
+            "predicateType": "https://slsa.dev/provenance/v1",
+            "predicate": {
+              "buildDefinition": {
+                "buildType": "https://github.com/slsa-framework/slsa-github-generator/generic@v1",
+                "externalParameters": {
+                  "repository": "${{ github.repository }}",
+                  "ref": "${{ github.ref }}",
+                  "workflow": "${{ github.workflow }}"
+                },
+                "internalParameters": {
+                  "github": {
+                    "event_name": "${{ github.event_name }}",
+                    "repository_id": "${{ github.repository_id }}",
+                    "repository_owner_id": "${{ github.repository_owner_id }}"
+                  }
+                },
+                "resolvedDependencies": []
+              },
+              "runDetails": {
+                "builder": {
+                  "id": "https://github.com/actions/runner"
+                },
+                "metadata": {
+                  "invocationId": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}",
+                  "startedOn": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                }
+              }
+            }
+          }
+          EOF
+
+          echo "## SLSA Provenance" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Generated SLSA v1.0 provenance for:" >> $GITHUB_STEP_SUMMARY
+          echo "- terraform-providers.json" >> $GITHUB_STEP_SUMMARY
+          echo "- terraform-providers.spdx.json" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "SLSA Level: 2 (Hosted build platform with signed provenance)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign Provenance
+        run: |
+          cosign sign-blob --yes \
+            --output-signature provenance/slsa-provenance.json.sig \
+            --output-certificate provenance/slsa-provenance.json.cert \
+            provenance/slsa-provenance.json
+
+      - name: Upload Provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: slsa-provenance
+          path: provenance/
+          retention-days: 90
+
+  # ==========================================================================
+  # Summary
+  # ==========================================================================
+  supply-chain-summary:
+    name: Supply Chain Summary
+    runs-on: ubuntu-latest
+    needs: [lockfile-verify, sbom-generation]
+    if: always()
+
+    steps:
+      - name: Check Results
+        run: |
+          echo "## Supply Chain Security Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "${{ needs.lockfile-verify.result }}" == "failure" ]; then
+            echo "- Lockfile Verification: FAILED" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- Lockfile Verification: PASSED" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.sbom-generation.result }}" == "failure" ]; then
+            echo "- SBOM Generation: FAILED" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- SBOM Generation: PASSED" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          if [ "${{ needs.lockfile-verify.result }}" == "failure" ]; then
+            echo ""
+            echo "::error::Supply chain security checks failed."
+            exit 1
+          fi

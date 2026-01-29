@@ -4,6 +4,7 @@
 
 [![Terraform](https://img.shields.io/badge/Terraform-%3E%3D1.7-blue.svg)](https://www.terraform.io/)
 [![Security Scan](https://github.com/innonynet/sample/actions/workflows/security-scan.yml/badge.svg)](https://github.com/innonynet/sample/actions/workflows/security-scan.yml)
+[![Policy Check](https://github.com/innonynet/sample/actions/workflows/policy-check.yml/badge.svg)](https://github.com/innonynet/sample/actions/workflows/policy-check.yml)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 ## 概要
@@ -19,6 +20,7 @@
 - **Azure Bastion** - セキュアな管理アクセス
 - **Key Vault** - シークレット管理
 - **Log Analytics** - ログ収集
+- **Azure Monitor Alerts** - 監視アラート（オプション）
 
 ## アーキテクチャ
 
@@ -63,8 +65,11 @@ stacks/dev/main.tf
     ├── module "network" ← cloud/azure/network/
     │     └─ VM Subnet, AzureBastionSubnet, NAT Gateway, NSG
     │
-    └── module "platform" ← cloud/azure/platform/
-          └─ VM, NIC, Bastion, Public IP (Bastion用)
+    ├── module "platform" ← cloud/azure/platform/
+    │     └─ VM, NIC, Bastion, Public IP (Bastion用)
+    │
+    └── module "observability" ← cloud/azure/observability/ (optional)
+          └─ Action Groups, Metric Alerts
 ```
 
 ## クイックスタート
@@ -97,6 +102,7 @@ stacks/dev/main.tf
    ```
    project        = "demo"
    ssh_public_key = "ssh-rsa AAAA..."
+   oncall_email   = "alerts@example.com"  # Optional
    ```
 
 ### 3. backend.tf の更新
@@ -148,6 +154,8 @@ terraform apply
 | `vm_size` | `Standard_D2s_v3` | VM サイズ |
 | `admin_username` | `azureuser` | VM 管理者ユーザー名 |
 | `network_cidr` | `10.0.0.0/16` | VNet CIDR |
+| `enable_observability` | `true` | 監視モジュールを有効化 |
+| `oncall_email` | `""` | アラート通知先メール |
 
 ## Outputs
 
@@ -180,14 +188,17 @@ az network bastion ssh \
   --ssh-key ~/.ssh/id_rsa
 ```
 
-## CI/CD
+## CI/CD パイプライン
 
 ### GitHub Actions ワークフロー
 
 | ワークフロー | トリガー | 内容 |
 |-------------|---------|------|
 | **Security Scan** | Push, PR | TFLint + Trivy によるセキュリティスキャン |
+| **Policy Check** | PR | OPA/Conftest によるポリシーチェック |
 | **Drift Detection** | 毎日 09:00 JST | インフラのドリフト検知 |
+| **Supply Chain** | Push, PR | SBOM生成、成果物署名、SLSA Provenance |
+| **Documentation** | Push | terraform-docs による自動ドキュメント生成 |
 
 ### セキュリティスキャン
 
@@ -196,11 +207,115 @@ az network bastion ssh \
 
 結果は GitHub Security タブで確認可能。
 
+### ポリシーチェック
+
+PR時に以下のポリシーをチェック:
+
+- **Public IP制限**: Bastion/NAT Gateway以外のPublic IP禁止
+- **必須タグ強制**: Environment, Project, ManagedBy タグ必須
+- **VM SKU制限**: 許可されたSKUのみ使用可能
+- **ストレージ暗号化**: HTTPS必須、TLS 1.2必須
+
 ### ドリフト検知
 
 - 毎日自動実行
 - ドリフト検知時は GitHub Issue を自動作成
 - 手動実行も可能（Actions → Drift Detection → Run workflow）
+
+### サプライチェーンセキュリティ
+
+- **SBOM生成**: CycloneDX/SPDX形式でTerraform依存関係を記録
+- **成果物署名**: Sigstore Cosign（キーレス）で署名
+- **SLSA Provenance**: Level 2 Provenance生成
+
+## Policy as Code
+
+### OPA/Conftest ポリシー
+
+`policies/opa/terraform/` に配置:
+
+| ポリシー | 説明 |
+|---------|------|
+| `public_ip.rego` | Public IP制限 |
+| `mandatory_tags.rego` | 必須タグ強制 |
+| `vm_sku.rego` | VM SKU制限 |
+| `storage_encryption.rego` | ストレージ暗号化強制 |
+
+### Azure Policy
+
+`policies/azure/definitions/` にJSON定義:
+
+- `deny-public-ip.json`
+- `require-tags.json`
+- `allowed-vm-skus.json`
+- `require-storage-encryption.json`
+
+`cloud/azure/governance/` モジュールでデプロイ可能。
+
+## Observability/SRE
+
+### アラート
+
+`cloud/azure/observability/` モジュールで以下のアラートを設定:
+
+| アラート | 閾値 | Severity |
+|---------|------|----------|
+| VM CPU Critical | > 95% | Critical |
+| VM CPU Warning | > 80% | Warning |
+| VM Disk Critical | > 95% | Critical |
+| VM Disk Warning | > 85% | Warning |
+| VM Availability | < 100% | Critical |
+
+### SLO定義
+
+- [VM Availability SLO](docs/slo/vm-availability.md) - 99.9% (Production)
+- [Bastion Availability SLO](docs/slo/bastion-availability.md) - 99.5% (Production)
+
+### Runbooks
+
+- [VM高CPU対応](docs/runbooks/vm-high-cpu.md)
+- [VMディスク満杯対応](docs/runbooks/vm-disk-full.md)
+- [Bastion接続障害対応](docs/runbooks/bastion-connection-fail.md)
+- [ドリフト検知対応](docs/runbooks/drift-detected.md)
+
+### インシデント対応
+
+- [オンコールガイド](docs/incident-response/on-call-guide.md)
+- [エスカレーションマトリクス](docs/incident-response/escalation-matrix.md)
+- [ポストモーテムテンプレート](docs/incident-response/postmortem-template.md)
+
+## Developer Experience
+
+### 新環境作成
+
+```bash
+./scripts/new-stack.sh <env_name> [options]
+
+# 例:
+./scripts/new-stack.sh test
+./scripts/new-stack.sh sandbox --project myproject --region westus2
+```
+
+詳細: [新環境作成ガイド](docs/guides/new-environment.md)
+
+### 新モジュール作成
+
+```bash
+./scripts/new-module.sh <module_name>
+
+# 例:
+./scripts/new-module.sh storage
+```
+
+詳細: [新モジュール作成ガイド](docs/guides/new-module.md)
+
+### ドキュメント生成
+
+```bash
+./scripts/docs-generate.sh [module_path]
+```
+
+または、PRマージ時に自動生成。
 
 ## セキュリティ設計
 
@@ -219,25 +334,54 @@ az network bastion ssh \
 - アウトバウンド通信は NAT Gateway 経由（固定IP）
 - Key Vault はネットワーク制限あり（Azure Services のみ）
 
+詳細: [セキュリティチェックリスト](docs/guides/security-checklist.md)
+
 ## ディレクトリ構成
 
 ```
 .
 ├── .github/workflows/
-│   ├── drift-detection.yml  # ドリフト検知
-│   └── security-scan.yml    # セキュリティスキャン
+│   ├── drift-detection.yml   # ドリフト検知
+│   ├── security-scan.yml     # セキュリティスキャン
+│   ├── policy-check.yml      # ポリシーチェック
+│   ├── supply-chain.yml      # サプライチェーンセキュリティ
+│   └── docs.yml              # ドキュメント生成
 ├── cloud/azure/
-│   ├── foundation/          # RG, VNet, Key Vault, Log Analytics
-│   ├── network/             # Subnets, NAT Gateway, NSG
-│   └── platform/            # VM, Bastion
+│   ├── foundation/           # RG, VNet, Key Vault, Log Analytics
+│   ├── network/              # Subnets, NAT Gateway, NSG
+│   ├── platform/             # VM, Bastion
+│   ├── governance/           # Azure Policy
+│   └── observability/        # Alerts, Action Groups
+├── policies/
+│   ├── opa/terraform/        # OPA/Conftest ポリシー
+│   ├── azure/definitions/    # Azure Policy JSON定義
+│   └── lockfile/             # ロックファイル検証
 ├── stacks/
-│   ├── dev/                 # 開発環境
-│   ├── stg/                 # ステージング環境
-│   └── prd/                 # 本番環境
-├── .tflint.hcl              # TFLint 設定
-├── .trivyignore             # Trivy 除外設定
-└── .claude/rules/           # Claude Code 設定
+│   ├── dev/                  # 開発環境
+│   ├── stg/                  # ステージング環境
+│   └── prd/                  # 本番環境
+├── templates/
+│   └── stack/                # 新環境テンプレート
+├── scripts/
+│   ├── new-stack.sh          # 新環境作成
+│   ├── new-module.sh         # 新モジュール作成
+│   └── docs-generate.sh      # ドキュメント生成
+├── docs/
+│   ├── slo/                  # SLO定義
+│   ├── runbooks/             # 運用手順書
+│   ├── incident-response/    # インシデント対応
+│   ├── guides/               # ガイド
+│   └── adr/                  # ADR
+├── .tflint.hcl               # TFLint 設定
+├── .trivyignore              # Trivy 除外設定
+└── .claude/rules/            # Claude Code 設定
 ```
+
+## Architecture Decision Records (ADR)
+
+- [ADR 0001: Terraform Cloud使用](docs/adr/0001-use-terraform-cloud.md)
+- [ADR 0002: Bastion経由アクセス](docs/adr/0002-bastion-only-access.md)
+- [ADR 0003: Policy as Code](docs/adr/0003-policy-as-code.md)
 
 ## License
 

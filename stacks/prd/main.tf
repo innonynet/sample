@@ -51,6 +51,23 @@ module "platform" {
 }
 
 # =============================================================================
+# Observability Layer
+# =============================================================================
+
+module "observability" {
+  source = "../../cloud/azure/observability"
+  count  = var.enable_observability ? 1 : 0
+
+  environment                = var.environment
+  project                    = var.project
+  resource_group_name        = module.foundation.resource_group_name
+  vm_id                      = module.platform.vm_id
+  log_analytics_workspace_id = module.foundation.log_analytics_workspace_id
+  oncall_email               = var.oncall_email
+  enable_alerts              = true
+}
+
+# =============================================================================
 # Outputs
 # =============================================================================
 

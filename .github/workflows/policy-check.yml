@@ -1,0 +1,148 @@
+name: Policy Check
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'cloud/**'
+      - 'stacks/**'
+      - 'policies/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  TF_CLOUD_ORGANIZATION: "Innospot"
+  CONFTEST_VERSION: "0.50.0"
+
+jobs:
+  policy-check:
+    name: OPA Policy Check
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        stack: [dev, stg, prd]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+          terraform_wrapper: false
+
+      - name: Setup Conftest
+        run: |
+          wget -q https://github.com/open-policy-agent/conftest/releases/download/v${{ env.CONFTEST_VERSION }}/conftest_${{ env.CONFTEST_VERSION }}_Linux_x86_64.tar.gz
+          tar xzf conftest_${{ env.CONFTEST_VERSION }}_Linux_x86_64.tar.gz
+          sudo mv conftest /usr/local/bin/
+
+      - name: Terraform Init
+        working-directory: stacks/${{ matrix.stack }}
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: stacks/${{ matrix.stack }}
+        run: |
+          terraform plan -out=tfplan -no-color 2>&1 | tee plan_output.txt
+        continue-on-error: true
+
+      - name: Convert Plan to JSON
+        working-directory: stacks/${{ matrix.stack }}
+        run: |
+          terraform show -json tfplan > tfplan.json
+
+      - name: Run Policy Check
+        id: conftest
+        working-directory: stacks/${{ matrix.stack }}
+        run: |
+          echo "## Policy Check Results - ${{ matrix.stack }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Run conftest and capture output
+          RESULT=$(conftest test tfplan.json \
+            --policy ../../policies/opa/terraform \
+            --data ../../policies/opa/data \
+            --namespace terraform.azure \
+            --output stdout 2>&1) || true
+
+          echo "$RESULT"
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "$RESULT" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+
+          # Check for failures
+          if echo "$RESULT" | grep -q "FAIL"; then
+            echo "policy_failed=true" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+          echo "policy_failed=false" >> $GITHUB_OUTPUT
+
+      - name: Comment on PR
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const stack = '${{ matrix.stack }}';
+            const body = `## Policy Check Failed - ${stack}
+
+            Policy violations were detected in the Terraform plan for the **${stack}** environment.
+
+            Please review the workflow logs and fix the policy violations before merging.
+
+            ### Common Violations:
+            - **Public IP**: Only Bastion and NAT Gateway Public IPs are allowed
+            - **Missing Tags**: All resources must have Environment, Project, and ManagedBy tags
+            - **VM SKU**: Only approved VM sizes are allowed
+            - **Storage**: Must use HTTPS-only and TLS 1.2+
+
+            [View workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            `;
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('Policy Check Failed')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body
+              });
+            }
+
+  policy-summary:
+    name: Policy Summary
+    runs-on: ubuntu-latest
+    needs: [policy-check]
+    if: always()
+
+    steps:
+      - name: Check Results
+        run: |
+          if [ "${{ needs.policy-check.result }}" == "failure" ]; then
+            echo "::error::Policy check failed. Please fix policy violations before merging."
+            exit 1
+          fi
+          echo "All policy checks passed."
