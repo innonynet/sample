@@ -65,5 +65,6 @@ variable "enable_observability" {
 variable "oncall_email" {
   type        = string
   description = "On-call email address for alert notifications"
+  sensitive   = true
   default     = ""
 }
